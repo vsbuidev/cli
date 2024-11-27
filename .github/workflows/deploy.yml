@@ -1,0 +1,56 @@
+name: Build and Deploy Angular Application
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # Step 2: Set Up Node.js
+      - name: Set Up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      # Step 3: Install Dependencies and Build
+      - name: Install and Build
+        run: |
+          npm install
+          npm run build --prod
+          tar -czf dist.tar.gz -C dist/sample-pwa .
+
+      # Step 4: Deploy to AWS EC2
+      - name: Deploy to EC2
+        env:
+          SERVER_IP: 54.164.115.98
+          SSH_USER: ec2-user
+          DEPLOY_DIR: /var/www/html
+
+        run: |
+          set -e
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
+
+          # Upload build archive
+          scp -i private_key.pem -o StrictHostKeyChecking=no dist.tar.gz $SSH_USER@$SERVER_IP:/home/$SSH_USER
+
+          # Extract and deploy on the server
+          ssh -i private_key.pem -o StrictHostKeyChecking=no $SSH_USER@$SERVER_IP << EOF
+            sudo rm -rf $DEPLOY_DIR/*
+            sudo tar -xzf /home/$SSH_USER/dist.tar.gz -C $DEPLOY_DIR
+            sudo chown -R apache:apache $DEPLOY_DIR
+            sudo chmod -R 755 $DEPLOY_DIR
+            sudo rm -f /home/$SSH_USER/dist.tar.gz
+            sudo systemctl restart httpd
+          EOF
+
+          # Clean up
+          rm private_key.pem
